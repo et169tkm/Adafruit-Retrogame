@@ -113,12 +113,17 @@ struct {
 	// (using HDMI or composite instead), as with our original
 	// retro gaming guide.
 	// Input   Output (from /usr/include/linux/input.h)
-	{  25,     KEY_LEFT     },   // Joystick (4 pins)
-	{   9,     KEY_RIGHT    },
-	{  10,     KEY_UP       },
-	{  17,     KEY_DOWN     },
-	{  23,     KEY_LEFTCTRL },   // A/Fire/jump/primary
-	{   7,     KEY_LEFTALT  },   // B/Bomb/secondary
+
+    // Example layout for Gameboy
+	{  23,     KEY_LEFT     },   // Joystick (4 pins)
+	{  27,     KEY_RIGHT    },
+	{  24,     KEY_UP       },
+	{  18,     KEY_DOWN     },
+	{   8,     KEY_ENTER    },   // START
+	{   7,     KEY_SPACE    },   // SELECT
+	{  10,     KEY_Z        },   // A
+	{   9,     KEY_X        },   // B
+
 	// For credit/start/etc., use USB keyboard or add more buttons.
 	{  -1,     -1           } }; // END OF LIST, DO NOT CHANGE
 
