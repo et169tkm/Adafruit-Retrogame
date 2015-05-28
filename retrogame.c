@@ -142,8 +142,21 @@ const unsigned long vulcanMask = (1L << 6) | (1L << 7);
 const int           vulcanKey  = KEY_ESC, // Keycode to send
                     vulcanTime = 1500,    // Pinch time in milliseconds
                     repTime1   = 500,     // Key hold time to begin repeat
-                    repTime2   = 100;     // Time between key repetitions
+                    repTime2   = 100,     // Time between key repetitions
 
+                    comboPinI  = 5,
+                    comboTime  = 400;     // Time for waiting for combo key
+int                 comboPinJ  = -1;      // Value to be determined
+
+struct {
+    unsigned long bitMask;
+    int key;
+} combo[] = {
+    { 1L<<5 | 1L<<6     ,   KEY_Y       },
+    { 1L<<5 | 1L<<7     ,   KEY_W       },
+
+    { 0                 ,   0           } // END OF LIST, DO NOT CHANGE
+};
 
 // A few globals ---------------------------------------------------------
 
@@ -255,6 +268,16 @@ static int boardType(void) {
 	return board;
 }
 
+int getComboKey(unsigned long bitMask) {
+    int i;
+    for(i=0; combo[i].bitMask; i++){
+        if(bitMask == combo[i].bitMask){
+            return combo[i].key;
+        }
+    }
+    return -1;
+}
+
 // Main stuff ------------------------------------------------------------
 
 #define PI1_BCM2708_PERI_BASE 0x20000000
@@ -281,7 +304,10 @@ int main(int argc, char *argv[]) {
 	                       timeout = -1, // poll() timeout
 	                       intstate[32], // Last-read state
 	                       extstate[32], // Debounced state
-	                       lastKey = -1; // Last key down (for repeat)
+	                       lastKey = -1, // Last key down (for repeat)
+                           lastPinJ = -1,// The pin that has a current event
+                           isCombo = 0,  // is sending a combo
+                           isPostCombo = 0; // don't send any event after combo key stops until all pins are release
 	unsigned long          bitMask, bit; // For Vulcan pinch detect
 	volatile unsigned char shortWait;    // Delay counter
 	struct input_event     keyEv, synEv; // uinput events
@@ -357,6 +383,13 @@ int main(int argc, char *argv[]) {
 			   pinConfig(io[i].pin, "value"    , "0"))
 				err("Pin config failed (GND)");
 		} else {
+            if (i == comboPinI) {
+sprintf(buf, "%d, %d", i, j);
+//write(2, "comboPinI: ", 11);
+//write(2, buf, strlen(buf));
+//write(2, "\n", 1);
+                comboPinJ = j;
+            }
 			// Set pin to input, detect rise+fall events
 			if(pinConfig(io[i].pin, "direction", "in") ||
 			   pinConfig(io[i].pin, "edge"     , "both"))
@@ -403,6 +436,11 @@ int main(int argc, char *argv[]) {
 				err("Can't SET_KEYBIT");
 		}
 	}
+    for(i=0; combo[i].bitMask; i++) {
+        if(ioctl(fd, UI_SET_KEYBIT, combo[i].key) < 0)
+            err("Can't SET_KEYBIT");
+    }
+        
 	if(ioctl(fd, UI_SET_KEYBIT, vulcanKey) < 0) err("Can't SET_KEYBIT");
 	struct uinput_user_dev uidev;
 	memset(&uidev, 0, sizeof(uidev));
@@ -439,6 +477,7 @@ int main(int argc, char *argv[]) {
 	while(running) { // Signal handler can set this to 0 to exit
 		// Wait for IRQ on pin (or timeout for button debounce)
 		if(poll(p, j, timeout) > 0) { // If IRQ...
+            lastPinJ = -1;
 			for(i=0; i<j; i++) {       // Scan non-GND pins...
 				if(p[i].revents) { // Event received?
 					// Read current pin state, store
@@ -450,47 +489,84 @@ int main(int argc, char *argv[]) {
 					if(c == '0')      intstate[i] = 1;
 					else if(c == '1') intstate[i] = 0;
 					p[i].revents = 0; // Clear flag
+                    lastPinJ = i;
 				}
 			}
-			timeout = debounceTime; // Set timeout for debounce
+            if (lastPinJ == comboPinJ && !isCombo && !isPostCombo) {
+                // if this is the combo key, change the timeout
+                timeout = comboTime;
+            } else {
+                // Set timeout for debounce
+			    timeout = debounceTime;
+            }
 			c       = 0;            // Don't issue SYN event
 			// Else timeout occurred
-		} else if(timeout == debounceTime) { // Button debounce timeout
+		} else if(timeout == debounceTime || timeout == comboTime) { // Button debounce timeout
 			// 'j' (number of non-GNDs) is re-counted as
 			// it's easier than maintaining an additional
 			// remapping table or a duplicate key[] list.
 			bitMask = 0L; // Mask of buttons currently pressed
 			bit     = 1L;
-			for(c=i=j=0; io[i].pin >= 0; i++, bit<<=1) {
-				if(io[i].key != GND) {
-					// Compare internal state against
-					// previously-issued value.  Send
-					// keystrokes only for changed states.
-					if(intstate[j] != extstate[j]) {
-						extstate[j] = intstate[j];
-						keyEv.code  = io[i].key;
-						keyEv.value = intstate[j];
-						write(fd, &keyEv,
-						  sizeof(keyEv));
-						c = 1; // Follow w/SYN event
-						if(intstate[j]) { // Press?
-							// Note pressed key
-							// and set initial
-							// repeat interval.
-							lastKey = i;
-							timeout = repTime1;
-						} else { // Release?
-							// Stop repeat and
-							// return to normal
-							// IRQ monitoring
-							// (no timeout).
-							lastKey = timeout = -1;
-						}
-					}
-					j++;
-					if(intstate[i]) bitMask |= bit;
-				}
-			}
+            for(i=0; io[i].pin >= 0; i++, bit<<=1) {
+                if(io[i].key != GND && intstate[i]) {
+                    bitMask |= bit;
+                }
+            }
+            if (getComboKey(bitMask) >= 0) { // combo just pressed
+                isCombo = 1;
+                lastKey = getComboKey(bitMask);
+                keyEv.code = lastKey;
+                keyEv.value = 1;
+                write(fd, &keyEv, sizeof(keyEv));
+                c = 1;
+                timeout = repTime1;
+            } else {
+                timeout = -1;
+                if (isCombo) { // if it was combo, but no longer is
+                    isCombo = 0;
+                    isPostCombo = 1;
+                    keyEv.code = lastKey;
+                    keyEv.value = 0;
+                    write(fd, &keyEv, sizeof(keyEv));
+                    c = 1;
+                    lastKey = -1;
+                } else {
+                    // not a combo event
+                    if (!isPostCombo) { // suppress the event if in post-combo state
+            			for(c=i=j=0; io[i].pin >= 0; i++) {
+            				if(io[i].key != GND) {
+            					// Compare internal state against
+            					// previously-issued value.  Send
+            					// keystrokes only for changed states.
+            					if(intstate[j] != extstate[j]) {
+            						extstate[j] = intstate[j];
+            						keyEv.code  = io[i].key;
+            						keyEv.value = intstate[j];
+            						write(fd, &keyEv, sizeof(keyEv));
+            						c = 1; // Follow w/SYN event
+            						if(intstate[j]) { // Press?
+            							// Note pressed key
+            							// and set initial
+            							// repeat interval.
+            							lastKey = i;
+            							timeout = repTime1;
+            						} else { // Release?
+            							// Stop repeat and
+            							// return to normal
+            							// IRQ monitoring
+            							// (no timeout).
+            							lastKey = -1;
+            						}
+            					}
+            					j++;
+            				}
+            			}
+                    }
+                }
+            }
+            if (bitMask == 0L){ // all pins are released, no longer is post combo
+                isPostCombo = 0;
+            }
 
 			// If the "Vulcan nerve pinch" buttons are pressed,
 			// set long timeout -- if this time elapses without
@@ -513,7 +589,7 @@ int main(int argc, char *argv[]) {
 			if(timeout == repTime1) timeout = repTime2;
 			else if(timeout > 30)   timeout -= 5; // Accelerate
 			c           = 1; // Follow w/SYN event
-			keyEv.code  = io[lastKey].key;
+			keyEv.code  = (isCombo ? lastKey : io[lastKey].key);
 			keyEv.value = 2; // Key repeat event
 			write(fd, &keyEv, sizeof(keyEv));
 		}
@@ -531,3 +607,5 @@ int main(int argc, char *argv[]) {
 
 	return 0;
 }
+
+
