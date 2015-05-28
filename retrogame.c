@@ -146,6 +146,13 @@ const int           vulcanKey  = KEY_ESC, // Keycode to send
 
                     comboPinI  = 5,
                     comboTime  = 400;     // Time for waiting for combo key
+                                          // When the combo button is pressed, no keyboard event is fired yet.
+                                          // If another button is pressed within this interval, the combo key will be fired after debounce.
+                                          // If no button is pressed within this interval, the corresponding keyboard event of the combo button will be fired (ie. this is just a single button press).
+                                          //
+                                          // The interval has to be carefully determined. 
+                                          // If it is too short, it will be hard to trigger the combo;
+                                          // if it is too long, it will wait a long time before treating the button press as a single-button event.
 int                 comboPinJ  = -1;      // Value to be determined
 
 struct {
