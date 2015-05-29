@@ -391,10 +391,6 @@ int main(int argc, char *argv[]) {
 				err("Pin config failed (GND)");
 		} else {
             if (i == comboPinI) {
-sprintf(buf, "%d, %d", i, j);
-//write(2, "comboPinI: ", 11);
-//write(2, buf, strlen(buf));
-//write(2, "\n", 1);
                 comboPinJ = j;
             }
 			// Set pin to input, detect rise+fall events
