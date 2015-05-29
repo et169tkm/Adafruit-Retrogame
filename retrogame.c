@@ -592,7 +592,7 @@ int main(int argc, char *argv[]) {
 			if(timeout == repTime1) timeout = repTime2;
 			else if(timeout > 30)   timeout -= 5; // Accelerate
 			c           = 1; // Follow w/SYN event
-			keyEv.code  = (isCombo ? lastKey : io[lastKey].key);
+			keyEv.code  = (isCombo ? lastKey : io[lastKey].key); // in isCombo state, the lastKey is the actual key to be sent; in normal state, lastKey is the index of the key in the io[] array
 			keyEv.value = 2; // Key repeat event
 			write(fd, &keyEv, sizeof(keyEv));
 		}
